@@ -30,7 +30,7 @@ case class NetworkInfo(
     * we assume that container-mode networking is exclusive of bridge-mode networking.
     */
   def effectiveIpAddress(runSpec: RunSpec): Option[String] = {
-    if (runSpec.networks.hasContainerNetworking) {
+    if (!ipAddresses.isEmpty) {
       pickFirstIpAddressFrom(ipAddresses)
     } else {
       Some(hostName)
