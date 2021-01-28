@@ -97,14 +97,14 @@ class TaskTest extends UnitTest with Inside {
       f.taskWithMultipleNetworksAndOneIp.status.networkInfo.effectiveIpAddress(f.appWithIpAddress).value should equal(f.ipString1)
     }
 
-    "effectiveIpAddress returns None if there is no ip" in {
+    "effectiveIpAddress returns agent hostname if there is no ip" in {
       val f = new Fixture
-      f.taskWithMultipleNetworkAndNoIp.status.networkInfo.effectiveIpAddress(f.appWithIpAddress) should be(None)
+      f.taskWithMultipleNetworkAndNoIp.status.networkInfo.effectiveIpAddress(f.appWithIpAddress) should be(Some("agent1.mesos"))
     }
 
-    "effectiveIpAddress returns the agent ip for MarathonTask instances with one NetworkInfo (if the app does NOT request an IP)" in {
+    "effectiveIpAddress returns the first container ip for MarathonTask instances with one NetworkInfo (if the app does NOT request an IP)" in {
       val f = new Fixture
-      f.taskWithOneIp.status.networkInfo.effectiveIpAddress(f.appWithoutIpAddress).value should equal(f.host)
+      f.taskWithOneIp.status.networkInfo.effectiveIpAddress(f.appWithoutIpAddress).value should equal(f.ipString1)
     }
 
     "ipAddresses returns None for MarathonTask instances with no IPs" in {

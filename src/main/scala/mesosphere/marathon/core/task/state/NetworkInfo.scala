@@ -23,11 +23,8 @@ case class NetworkInfo(
   import NetworkInfo._
 
   /**
-    * compute the effective IP address based on whether the runSpec declares container-mode networking; if so
-    * then choose the first address from the list provided by Mesos. Otherwise, in host- and bridge-mode
-    * networking just use the agent hostname as the effective IP.
-    *
-    * we assume that container-mode networking is exclusive of bridge-mode networking.
+    * compute the effective IP address; choose the first address from the list provided by Mesos if it's not empty.
+    * Otherwise,just use the agent hostname as the effective IP.
     */
   def effectiveIpAddress(runSpec: RunSpec): Option[String] = {
     if (!ipAddresses.isEmpty) {

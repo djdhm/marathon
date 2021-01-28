@@ -136,8 +136,8 @@ class NetworkInfoTest extends UnitTest {
               containerPort = Some(31000)),
             PortAssignment(
               portName = None,
-              effectiveIpAddress = None,
-              effectivePort = PortAssignment.NoPort,
+              effectiveIpAddress = Option(f.hostName),
+              effectivePort = 0,
               hostPort = None,
               containerPort = Some(0)),
             PortAssignment(

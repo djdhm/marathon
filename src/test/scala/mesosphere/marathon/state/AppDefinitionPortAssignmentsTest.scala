@@ -56,12 +56,12 @@ class AppDefinitionPortAssignmentsTest extends UnitTest {
         t.copy(status = t.status.copy(networkInfo = NetworkInfo(hostName, hostPorts = Nil, ipAddresses = Nil)))
       }
 
-      Then("The port assignments are empty")
+      Then("The port assignments are not empty")
       task.status.networkInfo.portAssignments(app, includeUnresolved = true) should equal(Seq(
         PortAssignment(
           portName = Some("http"),
-          effectiveIpAddress = None,
-          effectivePort = PortAssignment.NoPort,
+          effectiveIpAddress = Some(hostName),
+          effectivePort = 80,
           hostPort = None,
           containerPort = Some(80))
       ))
