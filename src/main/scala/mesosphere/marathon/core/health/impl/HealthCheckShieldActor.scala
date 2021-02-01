@@ -13,17 +13,17 @@ import scala.concurrent.Future
 import akka.{Done}
 
 // This actor serves two purposes:
-// 1. Detect the leadership change, so that the cache in HealthCheckShieldManager is updated when we become a leader
+// 1. Detect the leadership change, so that the cache in HealthCheckShieldApi is updated when we become a leader
 // 2. Schedule a periodical purge of the expired health check shields
 private[health] class HealthCheckShieldActor(
-    manager: HealthCheckShieldManager,
+    api: HealthCheckShieldApiInternal,
     conf: HealthCheckShieldConf
 ) extends Actor with Timers with StrictLogging {
   var lastPurge: Future[Done] = Future.successful(Done)
 
   override def preStart() = {
     if (conf.healthCheckShieldFeatureEnabled) {
-      val cacheInitFuture = manager.fillCacheFromStorage()
+      val cacheInitFuture = api.reloadFromRepository()
       // There's no way in Marathon codebase to wait for asynchronous preload
       // By blocking, we give the future at least some time to populate the cache
       Await.result(cacheInitFuture, atMost = 5.seconds)
@@ -45,7 +45,7 @@ private[health] class HealthCheckShieldActor(
     case Purge =>
       // ensure we have only one purge at a time
       if (lastPurge.isCompleted) {
-        lastPurge = manager.purgeExpiredShields()
+        lastPurge = api.purgeExpiredShields()
       }
   }
 }
@@ -54,6 +54,6 @@ object HealthCheckShieldActor {
   case class TimerKey()
   case class Purge()
 
-  def props(manager: HealthCheckShieldManager, conf: HealthCheckShieldConf): Props =
-    Props(new HealthCheckShieldActor(manager, conf))
+  def props(api: HealthCheckShieldApiInternal, conf: HealthCheckShieldConf): Props =
+    Props(new HealthCheckShieldActor(api, conf))
 }

@@ -37,7 +37,7 @@ class MarathonHealthCheckManager(
     instanceTracker: InstanceTracker,
     groupManager: GroupManager,
     conf: MarathonConf,
-    healthCheckShieldManager: HealthCheckShieldManager)(implicit mat: ActorMaterializer) extends HealthCheckManager with StrictLogging {
+    healthCheckShieldApi: HealthCheckShieldApi)(implicit mat: ActorMaterializer) extends HealthCheckManager with StrictLogging {
 
   protected[this] case class ActiveHealthCheck(
       healthCheck: HealthCheck,
@@ -87,18 +87,6 @@ class MarathonHealthCheckManager(
       ahcs(appId)(appVersion)
     }
 
-  override def enableShield(taskId: Task.Id, duration: FiniteDuration): Future[Done] = {
-    healthCheckShieldManager.enableShield(taskId, duration)
-  }
-
-  override def disableShield(taskId: Task.Id): Future[Done] = {
-    healthCheckShieldManager.disableShield(taskId)
-  }
-
-  override def listShields(): Future[Seq[HealthCheckShield]] = {
-    healthCheckShieldManager.getShields()
-  }
-
   override def add(app: AppDefinition, healthCheck: HealthCheck, instances: Seq[Instance]): Unit =
     appHealthChecks.writeLock { ahcs =>
       val healthChecksForApp = listActive(app.id, app.version)
@@ -109,7 +97,7 @@ class MarathonHealthCheckManager(
         logger.info(s"Adding health check for app [${app.id}] and version [${app.version}]: [$healthCheck]")
 
         val ref = actorRefFactory.actorOf(
-          HealthCheckActor.props(app, appHealthChecksActor, killService, healthCheck, instanceTracker, eventBus, healthCheckWorkerHub, healthCheckShieldManager))
+          HealthCheckActor.props(app, appHealthChecksActor, killService, healthCheck, instanceTracker, eventBus, healthCheckWorkerHub, healthCheckShieldApi))
         val newHealthChecksForApp =
           healthChecksForApp + ActiveHealthCheck(healthCheck, ref)
 

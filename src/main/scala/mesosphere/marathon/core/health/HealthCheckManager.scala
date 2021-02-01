@@ -63,10 +63,4 @@ trait HealthCheckManager {
     * Returns the health status of all instances of the supplied app.
     */
   def statuses(appId: AbsolutePathId): Future[Map[Instance.Id, Seq[Health]]]
-
-  def enableShield(taskId: Task.Id, duration: FiniteDuration): Future[Done]
-
-  def disableShield(taskId: Task.Id): Future[Done]
-
-  def listShields(): Future[Seq[HealthCheckShield]]
 }

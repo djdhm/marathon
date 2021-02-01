@@ -19,17 +19,33 @@ import mesosphere.marathon.core.storage.store.{IdResolver, PersistenceStore}
 import mesosphere.marathon.state.Timestamp
 
 trait HealthCheckShieldRepository
-  extends Repository[Task.Id, HealthCheckShield]
+  extends Repository[HealthCheckShield.Id, HealthCheckShield]
 
 object HealthCheckShieldRepository {
   implicit val category = "HealthCheckShield"
 
+  val v1ShieldName = "v1_shield"
+  val v2StoragePrefix = "v2_"
+
   implicit val byteOrder: ByteOrder = ByteOrder.BIG_ENDIAN
 
-  implicit val zkIdResolver = new IdResolver[Task.Id, HealthCheckShield, String, ZkId] {
-    def toStorageId(id: Task.Id, version: Option[OffsetDateTime]): ZkId =
-      ZkId(category, id.idString, version)
-    def fromStorageId(key: ZkId): Task.Id = Task.Id.parse(key.id)
+  implicit val zkIdResolver = new IdResolver[HealthCheckShield.Id, HealthCheckShield, String, ZkId] {
+    def toStorageId(id: HealthCheckShield.Id, version: Option[OffsetDateTime]): ZkId = {
+      if (id.shieldName != v1ShieldName) {
+        ZkId(category, s"${v2StoragePrefix}${id.idString}", version)
+      } else {
+        // v1 is supported in key write path to be able to delete v1 shields from Zk after read
+        ZkId(category, id.taskId.idString, version)
+      }
+    }
+    def fromStorageId(key: ZkId): HealthCheckShield.Id = {
+      if (key.id.startsWith(v2StoragePrefix)) {
+        HealthCheckShield.Id.parse(key.id.substring(v2StoragePrefix.length))
+      } else {
+        val taskId = Task.Id.parse(key.id)
+        HealthCheckShield.Id(taskId, v1ShieldName)
+      }
+    }
     val hasVersions: Boolean = false
     val category: String = HealthCheckShieldRepository.category
     def version(v: HealthCheckShield): OffsetDateTime =
@@ -39,11 +55,11 @@ object HealthCheckShieldRepository {
   implicit val zkMarshaller: Marshaller[HealthCheckShield, ZkSerialized] =
     Marshaller.opaque { (shield: HealthCheckShield) =>
       val bytes = ByteString.newBuilder
-      val serializationVersion = 1
+      val serializationVersion = 2
       bytes.putInt(serializationVersion)
-      val taskIdStrBytes = shield.taskId.idString.getBytes(StandardCharsets.UTF_8)
-      bytes.putInt(taskIdStrBytes.length)
-      bytes.putBytes(taskIdStrBytes)
+      val shieldIdBytes = shield.id.idString.getBytes(StandardCharsets.UTF_8)
+      bytes.putInt(shieldIdBytes.length)
+      bytes.putBytes(shieldIdBytes)
       bytes.putLong(shield.until.toInstant.toEpochMilli)
       ZkSerialized(bytes.result)
     }
@@ -51,20 +67,30 @@ object HealthCheckShieldRepository {
   implicit val zkUnmarshaller = Unmarshaller.strict { (zk: ZkSerialized) =>
     val it = zk.bytes.iterator
     val serializationVersion = it.getInt
-    val taskIdLength = it.getInt
-    val taskId = new String(it.getBytes(taskIdLength), StandardCharsets.UTF_8)
-    val until = Instant.ofEpochMilli(it.getLong)
-    HealthCheckShield(Task.Id.parse(taskId), Timestamp(until))
+    if (serializationVersion == 1) {
+      val taskIdLength = it.getInt
+      val taskIdString = new String(it.getBytes(taskIdLength), StandardCharsets.UTF_8)
+      val taskId = Task.Id.parse(taskIdString)
+      val until = Instant.ofEpochMilli(it.getLong)
+      HealthCheckShield(HealthCheckShield.Id(taskId, v1ShieldName), Timestamp(until))
+    } else if (serializationVersion == 2) {
+      val sheildIdLength = it.getInt
+      val shieldIdString = new String(it.getBytes(sheildIdLength), StandardCharsets.UTF_8)
+      val until = Instant.ofEpochMilli(it.getLong)
+      HealthCheckShield(HealthCheckShield.Id.parse(shieldIdString), Timestamp(until))
+    } else {
+      throw new MatchError(s"unsupported heatlh check shield serialization version ${serializationVersion}")
+    }
   }
 
   def zkRepository(persistenceStore: PersistenceStore[ZkId, String, ZkSerialized]): HealthCheckShieldRepository = {
     new HealthCheckShieldRepositoryImpl(persistenceStore)
   }
 
-  implicit val inMemIdResolver = new IdResolver[Task.Id, HealthCheckShield, String, RamId] {
-    def toStorageId(id: Task.Id, version: Option[OffsetDateTime]): RamId =
+  implicit val inMemIdResolver = new IdResolver[HealthCheckShield.Id, HealthCheckShield, String, RamId] {
+    def toStorageId(id: HealthCheckShield.Id, version: Option[OffsetDateTime]): RamId =
       RamId(category, id.idString, version)
-    def fromStorageId(key: RamId): Task.Id = Task.Id.parse(key.id)
+    def fromStorageId(key: RamId): HealthCheckShield.Id = HealthCheckShield.Id.parse(key.id)
     val hasVersions: Boolean = false
     val category: String = HealthCheckShieldRepository.category
     def version(v: HealthCheckShield): OffsetDateTime =
@@ -79,9 +105,9 @@ object HealthCheckShieldRepository {
 
 class HealthCheckShieldRepositoryImpl[K, C, S](persistenceStore: PersistenceStore[K, C, S])(
     implicit
-    ir: IdResolver[Task.Id, HealthCheckShield, C, K],
+    ir: IdResolver[HealthCheckShield.Id, HealthCheckShield, C, K],
     marshaller: Marshaller[HealthCheckShield, S],
     unmarshaller: Unmarshaller[S, HealthCheckShield]
-) extends PersistenceStoreRepository[Task.Id, HealthCheckShield, K, C, S](
+) extends PersistenceStoreRepository[HealthCheckShield.Id, HealthCheckShield, K, C, S](
   persistenceStore,
-  _.taskId) with HealthCheckShieldRepository
+  _.id) with HealthCheckShieldRepository

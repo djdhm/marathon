@@ -13,7 +13,7 @@ import mesosphere.marathon.core.instance.{Goal, GoalChangeReason, Instance}
 import mesosphere.marathon.core.launchqueue.LaunchQueue
 import mesosphere.marathon.core.readiness.ReadinessCheckExecutor
 import mesosphere.marathon.core.task.tracker.InstanceTracker
-import mesosphere.marathon.state.{RunSpec,Timestamp}
+import mesosphere.marathon.state.{RunSpec, Timestamp}
 
 import scala.async.Async.{async, await}
 import scala.collection.mutable

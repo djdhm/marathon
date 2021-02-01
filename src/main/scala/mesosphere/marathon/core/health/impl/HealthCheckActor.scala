@@ -30,7 +30,7 @@ private[health] class HealthCheckActor(
     instanceTracker: InstanceTracker,
     eventBus: EventStream,
     healthCheckHub: Sink[(AppDefinition, Instance, MarathonHealthCheck, ActorRef), NotUsed],
-    healthCheckShieldManager: HealthCheckShieldManager)
+    healthCheckShieldApi: HealthCheckShieldApi)
   extends Actor with StrictLogging {
 
   implicit val mat = ActorMaterializer()
@@ -118,7 +118,7 @@ private[health] class HealthCheckActor(
           return
         }
 
-        if (healthCheckShieldManager.isShielded(instance.appTask.taskId)) {
+        if (healthCheckShieldApi.isShielded(instance.appTask.taskId)) {
           logger.info(s"[health-check-shield] app ${app.id} version ${app.version}. Won't kill $instanceId because the shield is enabled")
           return
         }
@@ -271,7 +271,7 @@ object HealthCheckActor {
     instanceTracker: InstanceTracker,
     eventBus: EventStream,
     healthCheckHub: Sink[(AppDefinition, Instance, MarathonHealthCheck, ActorRef), NotUsed],
-    healthCheckShieldManager: HealthCheckShieldManager): Props = {
+    healthCheckShieldApi: HealthCheckShieldApi): Props = {
 
     Props(new HealthCheckActor(
       app,
@@ -281,7 +281,7 @@ object HealthCheckActor {
       instanceTracker,
       eventBus,
       healthCheckHub,
-      healthCheckShieldManager))
+      healthCheckShieldApi))
   }
 
   // self-sent every healthCheck.intervalSeconds

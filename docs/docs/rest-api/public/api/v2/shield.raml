@@ -3,15 +3,15 @@ description: |
 
 /:
   description: |
-    List current health check shields
+    List all health check shields
   get:
     description: |
-      Lists all health check shields currently saved in the persistence storage.
+      Lists all health check shields.
       Note that some shields could already be expired because the purge is done periodically.
     responses:
       200:
         description: |
-          Json array containing the shield id and the timestamp when it will expire.
+          Json array containing the task id, shield name, and the timestamp when it will expire.
         body:
           application/json:
             type: healthCheck.HealthCheckShield[]
@@ -22,13 +22,53 @@ description: |
 
 /{taskId}:
   description: |
+    List all health check shields of the task
+  get:
+    description: |
+      Lists all health check shields of the task.
+      Note that some shields could already be expired because the purge is done periodically.
+    responses:
+      200:
+        description: |
+          Json array containing the task id, shield name, and the timestamp when it will expire.
+        body:
+          application/json:
+            type: healthCheck.HealthCheckShield[]
+            example: !include examples/health-check-shield-get.json
+      403:
+        description: |
+          Health check shield API is disabled.
+
+/{taskId}/{shieldName}:
+  description: |
     Create, update, or delete a health check shield
   uriParameters:
     taskId:
       type: strings.TaskId
       description: |
         Id of the task, as displayed in the Marathon UI
-
+    shieldName:
+      type: string
+      description: |
+        The name of the shield. 
+        Allows to define multiple shields for a single task as well as to distinguish who put the shield
+  get:
+    description: |
+      If a shield with this name is defined for this task id, returns the info about this shield.
+    responses:
+      200:
+        description: |
+          Json object containing the task id, shield name, and the timestamp when it will expire.
+        body:
+          application/json:
+            type: healthCheck.HealthCheckShield
+            example: !include examples/health-check-shield-get-single.json
+      403:
+        description: |
+          Health check shield API is disabled.
+      404:
+        description: |
+          Health check with this name and task id does not exist
   put:
     description: |
       Create or update the shield for the specified task.
@@ -37,6 +77,7 @@ description: |
       Note that the shield operates on task level. After the corresponding Mesos container is gone the shield is useless.
       Marathon could still kill the instance for another reason like deployment.
       Mesos health checks are not supported as Mesos would kill the app without asking Marathon.
+      Multiple shields for the same application work in parallel. The app is protected until all of the shields are deleted or expired.
     is: [ secured ]
     queryParameters:
       duration:
