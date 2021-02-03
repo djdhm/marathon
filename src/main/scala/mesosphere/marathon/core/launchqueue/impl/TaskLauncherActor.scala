@@ -346,7 +346,7 @@ private class TaskLauncherActor(
   private[this] def launchAllowed(now: Timestamp, configRef: RunSpecConfigRef): Boolean = launchAllowedAt.get(configRef).exists(_ <= now)
   private[this] def shouldLaunchInstances(now: Timestamp): Boolean = {
     if (scheduledInstances.nonEmpty || launchAllowedAt.nonEmpty)
-      logger.info(s"Found scheduled instances: ${scheduledInstances.map(_.instanceId).mkString(",")} and current back-off map: $launchAllowedAt")
+      logger.info(s"Found scheduled instances (current back-off map $launchAllowedAt): ${scheduledInstances.map(_.instanceId).mkString(",")}")
     scheduledInstances.nonEmpty && scheduledVersions.exists { configRef => launchAllowed(now, configRef) }
   }
 

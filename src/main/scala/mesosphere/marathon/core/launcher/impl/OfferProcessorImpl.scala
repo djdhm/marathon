@@ -83,10 +83,11 @@ private[launcher] class OfferProcessorImpl(
   private def logOffer(offer: Offer): Unit = {
     val offerId = offer.getId.getValue
     val agentId = offer.getSlaveId.getValue
-    logger.debug(s"Processing offer: offerId $offerId, agentId $agentId")
+    logger.info(s"Processing offer: offerId $offerId, agentId $agentId (${offer.getHostname})")
     logger.debug(offer.toString)
   }
 
+  // This is likely beginning of offer matching
   override def processOffer(offer: Offer): Future[Done] = {
     incomingOffersMetric.increment()
     logOffer(offer)
