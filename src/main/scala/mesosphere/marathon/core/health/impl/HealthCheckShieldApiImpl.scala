@@ -144,15 +144,15 @@ final class HealthCheckShieldApiImpl(
     isShielded method is thread-safe, everything else requires some kind of synchronization
   */
   private class HealthCheckShieldCache extends StrictLogging {
-    val untilByTaskId = TrieMap.empty[Task.Id, Timestamp]
+    val maxExpirationByTaskId = TrieMap.empty[Task.Id, Timestamp]
     val shieldsByTaskId = TrieMap.empty[Task.Id, TrieMap[HealthCheckShield.Id, HealthCheckShield]]
 
     def isShielded(taskId: Task.Id): Boolean = {
-      untilByTaskId
+      maxExpirationByTaskId
         .get(taskId)
         .exists(until => {
           // removes only if 'until' is still the same
-          if (until < Timestamp.now() && untilByTaskId.remove(taskId, until)) {
+          if (until < Timestamp.now() && maxExpirationByTaskId.remove(taskId, until)) {
             logger.info(s"[health-check-shield] All shields expired for ${taskId}")
             false
           } else {
@@ -162,7 +162,7 @@ final class HealthCheckShieldApiImpl(
     }
 
     def clear(): Unit = {
-      untilByTaskId.clear()
+      maxExpirationByTaskId.clear()
       shieldsByTaskId.clear()
     }
 
@@ -170,7 +170,7 @@ final class HealthCheckShieldApiImpl(
       shieldsByTaskId
         .getOrElseUpdate(shield.id.taskId, TrieMap.empty[HealthCheckShield.Id, HealthCheckShield])
         .update(shield.id, shield)
-      updateUntilForTask(shield.id.taskId)
+      updateMaxExpirationIfAny(shield.id.taskId)
     }
 
     def remove(shieldId: HealthCheckShield.Id): Unit = {
@@ -181,7 +181,7 @@ final class HealthCheckShieldApiImpl(
           if (shields.isEmpty) {
             shieldsByTaskId.remove(shieldId.taskId)
           }
-          updateUntilForTask(shieldId.taskId)
+          updateMaxExpirationIfAny(shieldId.taskId)
         })
     }
 
@@ -211,14 +211,14 @@ final class HealthCheckShieldApiImpl(
         })
     }
 
-    private def updateUntilForTask(taskId: Task.Id): Unit = {
+    private def updateMaxExpirationIfAny(taskId: Task.Id): Unit = {
       shieldsByTaskId.get(taskId) match {
         case Some(shields) => {
           val maxUntil = shields.map(s => s._2.until).max
-          untilByTaskId.update(taskId, maxUntil)
+          maxExpirationByTaskId.update(taskId, maxUntil)
         }
         case None => {
-          untilByTaskId.remove(taskId)
+          maxExpirationByTaskId.remove(taskId)
         }
       }
     }
