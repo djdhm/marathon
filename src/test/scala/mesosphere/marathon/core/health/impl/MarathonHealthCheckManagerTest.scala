@@ -6,7 +6,7 @@ import akka.stream.ActorMaterializer
 import com.typesafe.config.{Config, ConfigFactory}
 import mesosphere.AkkaUnitTest
 import mesosphere.marathon.core.group.GroupManager
-import mesosphere.marathon.core.health.{Health, HealthCheck, MesosCommandHealthCheck}
+import mesosphere.marathon.core.health.{Health, HealthCheck, MesosCommandHealthCheck, HealthCheckShieldApi}
 import mesosphere.marathon.core.instance.update.{InstanceUpdateEffect, InstanceUpdateOperation}
 import mesosphere.marathon.core.instance.{Instance, TestTaskBuilder}
 import mesosphere.marathon.core.leadership.{AlwaysElectedLeadershipModule, LeadershipModule}
@@ -45,7 +45,7 @@ class MarathonHealthCheckManagerTest extends AkkaUnitTest with Eventually {
     implicit val eventStream: EventStream = new EventStream(system)
     val killService: KillService = mock[KillService]
     val conf = MarathonTestHelper.defaultConfig()
-    val healthCheckShieldManager = mock[HealthCheckShieldManager];
+    val healthCheckShieldApi = mock[HealthCheckShieldApi];
 
     implicit val hcManager: MarathonHealthCheckManager = new MarathonHealthCheckManager(
       system,
@@ -54,7 +54,7 @@ class MarathonHealthCheckManagerTest extends AkkaUnitTest with Eventually {
       instanceTracker,
       groupManager,
       conf,
-      healthCheckShieldManager
+      healthCheckShieldApi
     )
   }
 
