@@ -20,6 +20,7 @@ import mesosphere.marathon.core.readiness.ReadinessCheckExecutor
 import mesosphere.marathon.core.task.termination.KillService
 import mesosphere.marathon.core.task.termination.impl.KillStreamWatcher
 import mesosphere.marathon.core.task.tracker.InstanceTracker
+import mesosphere.marathon.metrics.Metrics
 import mesosphere.marathon.raml.Raml
 import mesosphere.marathon.state.{AppDefinition, RunSpec}
 import mesosphere.mesos.Constraints
@@ -37,7 +38,8 @@ private class DeploymentActor(
     launchQueue: LaunchQueue,
     healthCheckManager: HealthCheckManager,
     eventBus: EventStream,
-    readinessCheckExecutor: ReadinessCheckExecutor) extends Actor with StrictLogging {
+    readinessCheckExecutor: ReadinessCheckExecutor,
+    metrics: Metrics) extends Actor with StrictLogging {
 
   import context.dispatcher
 
@@ -226,7 +228,7 @@ private class DeploymentActor(
     } else {
       val promise = Promise[Unit]()
       context.actorOf(childSupervisor(TaskReplaceActor.props(deploymentManagerActor, status,
-        launchQueue, instanceTracker, eventBus, readinessCheckExecutor, run, promise), s"TaskReplace-${plan.id}"))
+        launchQueue, instanceTracker, eventBus, readinessCheckExecutor, run, promise, metrics), s"TaskReplace-${plan.id}"))
       promise.future.map(_ => Done)
     }
   }
@@ -247,7 +249,8 @@ object DeploymentActor {
     launchQueue: LaunchQueue,
     healthCheckManager: HealthCheckManager,
     eventBus: EventStream,
-    readinessCheckExecutor: ReadinessCheckExecutor): Props = {
+    readinessCheckExecutor: ReadinessCheckExecutor,
+    metrics: Metrics): Props = {
 
     Props(new DeploymentActor(
       deploymentManagerActor,
@@ -257,7 +260,8 @@ object DeploymentActor {
       launchQueue,
       healthCheckManager,
       eventBus,
-      readinessCheckExecutor
+      readinessCheckExecutor,
+      metrics
     ))
   }
 }

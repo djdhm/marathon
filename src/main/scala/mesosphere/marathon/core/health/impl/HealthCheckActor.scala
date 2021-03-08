@@ -262,9 +262,9 @@ private[health] class HealthCheckActor(
   }
 
   def handleHealthCheckStatesResponse(instance: Instance, health: Health, healths: Map[Instance.Id, Option[Boolean]]): Unit = {
-    val healthyInstances = healths.count { case(_, health) => health.isDefined && health.get }
+    val healthyInstances = healths.count { case (_, health) => health.isDefined && health.get }
 
-    if(healthyInstances / app.instances.toDouble >= app.upgradeStrategy.minimumHealthCapacity) {
+    if (healthyInstances / app.instances.toDouble >= app.upgradeStrategy.minimumHealthCapacity) {
       // TODO check killingInFlight?
       sendKillRequest(instance, health)
     } else {
