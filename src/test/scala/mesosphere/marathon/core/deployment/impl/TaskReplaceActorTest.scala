@@ -18,6 +18,8 @@ import mesosphere.marathon.core.launchqueue.LaunchQueue
 import mesosphere.marathon.core.readiness.{ReadinessCheck, ReadinessCheckExecutor, ReadinessCheckResult}
 import mesosphere.marathon.core.task.Task
 import mesosphere.marathon.core.task.tracker.InstanceTracker
+import mesosphere.marathon.metrics.Metrics
+import mesosphere.marathon.metrics.dummy.DummyMetrics
 import mesosphere.marathon.raml.Raml
 import mesosphere.marathon.state._
 import mesosphere.marathon.util.CancellableOnce
@@ -711,6 +713,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
     val readinessCheckExecutor: ReadinessCheckExecutor = mock[ReadinessCheckExecutor]
     val hostName = "host.some"
     val hostPorts = Seq(123)
+    val metrics: Metrics = DummyMetrics
 
     tracker.setGoal(any, any, any) answers { args =>
       def sendKilled(instance: Instance, goal: Goal): Unit = {
@@ -767,7 +770,7 @@ class TaskReplaceActorTest extends AkkaUnitTest with Eventually {
 
     def replaceActor(app: AppDefinition, promise: Promise[Unit]): ActorRef = system.actorOf(
       TaskReplaceActor.props(deploymentsManager, deploymentStatus, queue,
-        tracker, system.eventStream, readinessCheckExecutor, app, promise)
+        tracker, system.eventStream, readinessCheckExecutor, app, promise, metrics)
     )
   }
 }
