@@ -19,6 +19,8 @@ import mesosphere.marathon.core.launchqueue.LaunchQueue
 import mesosphere.marathon.core.readiness.ReadinessCheckExecutor
 import mesosphere.marathon.core.task.KillServiceMock
 import mesosphere.marathon.core.task.tracker.InstanceTracker
+import mesosphere.marathon.metrics.Metrics
+import mesosphere.marathon.metrics.dummy.DummyMetrics
 import mesosphere.marathon.state._
 import mesosphere.marathon.test.GroupCreation
 import org.mockito.Matchers
@@ -43,6 +45,7 @@ class DeploymentActorTest extends AkkaUnitTest with GroupCreation {
     tracker.setGoal(any, any, any).returns(Future.successful(Done))
     tracker.instanceUpdates returns Source.empty
 
+    val metrics: Metrics = DummyMetrics
     val queue: LaunchQueue = mock[LaunchQueue]
     val killService = new KillServiceMock(system)
     val hcManager: HealthCheckManager = mock[HealthCheckManager]
@@ -85,7 +88,8 @@ class DeploymentActorTest extends AkkaUnitTest with GroupCreation {
         queue,
         hcManager,
         system.eventStream,
-        readinessCheckExecutor
+        readinessCheckExecutor,
+        metrics
       )
     )
 
