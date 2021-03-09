@@ -40,9 +40,9 @@ class TaskReplaceActor(
   var lastTick = Timestamp.now
 
   private[this] val actorDelay =
-    metrics.timer(s"criteo.taskReplaceActor.delay.${pathId.toString.replaceAll("[^A-Za-z0-9]", "-")}")
+    metrics.timer(s"criteo.taskReplaceActor.delay.${pathId.toString.replaceAll("[^A-Za-z0-9]", "")}")
   private[this] val actorStepDuration =
-    metrics.timer(s"criteo.taskReplaceActor.step.${pathId.toString.replaceAll("[^A-Za-z0-9]", "-")}")
+    metrics.timer(s"criteo.taskReplaceActor.step.${pathId.toString.replaceAll("[^A-Za-z0-9]", "")}")
 
   private[this] var tick: Cancellable = null
 

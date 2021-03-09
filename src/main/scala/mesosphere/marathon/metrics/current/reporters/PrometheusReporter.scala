@@ -7,6 +7,7 @@ import java.util.concurrent.TimeUnit
 import com.codahale.metrics.{Counter, Gauge, Histogram, Meter, Metered, MetricRegistry, Timer}
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable.ListBuffer
 
 object PrometheusReporter {
   def report(registry: MetricRegistry): String = {
@@ -90,20 +91,20 @@ object PrometheusReporter {
     appendEmptyLine(buffer)
   }
 
-  private def reportRates(buffer: StringBuilder, name: String, metered: Metered): Unit = {
+  private def reportRates(buffer: StringBuilder, name: String, metered: Metered, labels: List[String] = Nil): Unit = {
     val meanRate = metered.getMeanRate * rateFactor
     val m1Rate = metered.getOneMinuteRate * rateFactor
     val m5Rate = metered.getFiveMinuteRate * rateFactor
     val m15Rate = metered.getFifteenMinuteRate * rateFactor
 
     appendMetricType(buffer, name + "_mean_rate", "gauge")
-    appendLine(buffer, s"${name}_mean_rate $meanRate")
+    appendLine(buffer, s"${buildName(name, labels, "_mean_rate")} $meanRate")
     appendMetricType(buffer, name + "_m1_rate", "gauge")
-    appendLine(buffer, s"${name}_m1_rate $m1Rate")
+    appendLine(buffer, s"${buildName(name, labels, "_m1_rate")} $m1Rate")
     appendMetricType(buffer, name + "_m5_rate", "gauge")
-    appendLine(buffer, s"${name}_m5_rate $m5Rate")
+    appendLine(buffer, s"${buildName(name, labels, "_m5_rate")} $m5Rate")
     appendMetricType(buffer, name + "_m15_rate", "gauge")
-    appendLine(buffer, s"${name}_m15_rate $m15Rate")
+    appendLine(buffer, s"${buildName(name, labels, "_m15_rate")} $m15Rate")
   }
 
   private def reportMetered(buffer: StringBuilder, name: String, meter: Metered): Unit = {
@@ -115,7 +116,28 @@ object PrometheusReporter {
     appendEmptyLine(buffer)
   }
 
-  private def reportTimer(buffer: StringBuilder, name: String, timer: Timer): Unit = {
+  private def buildName(name: String, labels: List[String] = Nil, suffix: String = ""): String = {
+    val labelsString = labels.size match {
+      case 0 => ""
+      case _ => s"{${labels.mkString(",")}}"
+    }
+
+    s"${name}${suffix}${labelsString}"
+  }
+
+  private def reportTimer(buffer: StringBuilder, realName: String, timer: Timer): Unit = {
+
+    val nameRegex = "marathon_criteo_taskReplaceActor_(delay|step)_(.*)_timer_seconds"r
+    val (name, label) = realName match {
+      case nameRegex(t, c) => (s"marathon_criteo_taskReplaceActor_${t}_timer_seconds", Some(s""""name=${c}""""))
+      case _ => (realName, None)
+    }
+
+    var labels: ListBuffer[String] = label match {
+      case Some(s) => ListBuffer(s.toString())
+      case _ => ListBuffer()
+    }
+
     val count = timer.getCount
     val snapshot = timer.getSnapshot
 
@@ -131,24 +153,24 @@ object PrometheusReporter {
     val stddev = snapshot.getStdDev * durationFactor
 
     appendMetricType(buffer, name, "summary")
-    appendLine(buffer, """%s{quantile="0.5"} %f""".format(name, p50))
-    appendLine(buffer, """%s{quantile="0.75"} %f""".format(name, p75))
-    appendLine(buffer, """%s{quantile="0.95"} %f""".format(name, p95))
-    appendLine(buffer, """%s{quantile="0.98"} %f""".format(name, p98))
-    appendLine(buffer, """%s{quantile="0.99"} %f""".format(name, p99))
-    appendLine(buffer, """%s{quantile="0.999"} %f""".format(name, p999))
-    appendLine(buffer, s"${name}_count $count")
+    appendLine(buffer, """%s %f""".format(buildName(name, (labels ++ ListBuffer(s"""quantile="0.5"""")).toList), p50))
+    appendLine(buffer, """%s %f""".format(buildName(name, (labels ++ ListBuffer(s"""quantile="0.75"""")).toList), p75))
+    appendLine(buffer, """%s %f""".format(buildName(name, (labels ++ ListBuffer(s"""quantile="0.95"""")).toList), p95))
+    appendLine(buffer, """%s %f""".format(buildName(name, (labels ++ ListBuffer(s"""quantile="0.98"""")).toList), p98))
+    appendLine(buffer, """%s %f""".format(buildName(name, (labels ++ ListBuffer(s"""quantile="0.99"""")).toList), p99))
+    appendLine(buffer, """%s %f""".format(buildName(name, (labels ++ ListBuffer(s"""quantile="0.999"""")).toList), p999))
+    appendLine(buffer, s"${buildName(name, labels.toList, "_count")} $count")
 
     appendMetricType(buffer, name + "_min", "gauge")
-    appendLine(buffer, s"${name}_min $min")
+    appendLine(buffer, s"${buildName(name, labels.toList, "_min")} $min")
     appendMetricType(buffer, name + "_mean", "gauge")
-    appendLine(buffer, s"${name}_mean $mean")
+    appendLine(buffer, s"${buildName(name, labels.toList, "_mean")} $mean")
     appendMetricType(buffer, name + "_max", "gauge")
-    appendLine(buffer, s"${name}_max $max")
+    appendLine(buffer, s"${buildName(name, labels.toList, "_max")} $max")
     appendMetricType(buffer, name + "_stddev", "gauge")
-    appendLine(buffer, s"${name}_stddev $stddev")
+    appendLine(buffer, s"${buildName(name, labels.toList, "_stddev")} $stddev")
 
-    reportRates(buffer, name, timer)
+    reportRates(buffer, name, timer, labels.toList)
 
     appendEmptyLine(buffer)
   }
