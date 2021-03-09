@@ -37,9 +37,12 @@ class TaskReplaceActor(
   def deploymentId = status.plan.id
   def pathId = runSpec.id
   val actorStart = Timestamp.now
+  var lastTick = Timestamp.now
 
   private[this] val actorDelay =
-    metrics.counter(s"criteo.taskReplaceActor.delay.${pathId.toString.replaceAll("[^A-Za-z0-9]", "-")}")
+    metrics.timer(s"criteo.taskReplaceActor.delay.${pathId.toString.replaceAll("[^A-Za-z0-9]", "-")}")
+  private[this] val actorStepDuration =
+    metrics.timer(s"criteo.taskReplaceActor.step.${pathId.toString.replaceAll("[^A-Za-z0-9]", "-")}")
 
   private[this] var tick: Cancellable = null
 
@@ -56,6 +59,7 @@ class TaskReplaceActor(
     // Fetch state of apps
     val system = akka.actor.ActorSystem("system")
     // FIXME(t.lange): Make those 10 seconds configurable
+
     tick = system.scheduler.schedule(0 seconds, 10 seconds)(request_health_status)
   }
 
@@ -77,6 +81,9 @@ class TaskReplaceActor(
 
   def request_health_status(): Unit = {
     logger.info(s"Requesting HealthStatus for ${pathId}")
+    val newTick = Timestamp.now
+    actorDelay.update(newTick.nanos - lastTick.nanos)
+    lastTick = newTick
     deploymentManagerActor ! HealthStatusRequest(pathId)
   }
 
@@ -100,7 +107,7 @@ class TaskReplaceActor(
     return nonRunningOldInstancesCount
   }
 
-  def step(health: Map[Instance.Id, Seq[Health]]): Unit = {
+  def step(health: Map[Instance.Id, Seq[Health]]): Future[Unit] = Future {
     logger.debug(s"---=== DEPLOYMENT STEP FOR ${pathId} ===---")
     val current_instances = instanceTracker.specInstancesSync(pathId, readAfterWrite = true).partition(_.runSpecVersion == runSpec.version)
 
@@ -110,7 +117,7 @@ class TaskReplaceActor(
     if (killNonRunningOldInstances(old_instances._2) > 0) {
       logger.info("Found and killed non running instances from a previous, likely failing, deployment. Was a new deployment applied forcefully?")
       logger.info("Aborting current deployment step and waiting for the next one.")
-      return
+      Done
     }
 
     val tooRecentOldInstancesCount = findInstancesStagedAfterActorStart(current_instances._2).size
@@ -144,6 +151,7 @@ class TaskReplaceActor(
     // that old instances (failing or running) are removed,
     // and new instances are all running.
     checkFinished(state.newInstancesRunning, state.oldInstances)
+    Done
   }
 
   override def postStop(): Unit = {
@@ -155,7 +163,9 @@ class TaskReplaceActor(
   override def receive: Receive = {
 
     case HealthStatusResponse(health) =>
-      step(health)
+      actorStepDuration {
+        step(health)
+      }
 
     case Status.Failure(e) =>
       // This is the result of failed launchQueue.addAsync(...) call. Log the message and
