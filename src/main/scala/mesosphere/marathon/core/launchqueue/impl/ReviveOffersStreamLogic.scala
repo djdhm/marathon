@@ -22,7 +22,6 @@ object ReviveOffersStreamLogic extends StrictLogging {
 
   case class NotDelayed(element: RunSpecConfigRef) extends DelayedStatus
 
-  var minimalResourcesPerRole: Map[Role, Resources] = Map();
   /**
     * Watches a stream of rate limiter updates and emits Active(configRef) when a configRef has an active backoff delay,
     * and Inactive(configRef) when it doesn't any longer.
@@ -76,35 +75,10 @@ object ReviveOffersStreamLogic extends StrictLogging {
     reviveStateFromInstancesAndDelays(defaultRole)
       .buffer(1, OverflowStrategy.dropHead) // While we are back-pressured, we drop older interim frames
       .via(RateLimiterFlow.apply(minReviveOffersInterval))
-      .map(l => findminimalResourcesPerRole(l))
       .map(_.roleReviveVersions)
       .via(reviveDirectiveFlow(enableSuppress))
       .map(l => { logger.info(s"Issuing following suppress/revive directives: = ${l} and offer wanted == ${OffersWanted}"); l })
       .via(reviveRepeaterWithTicks)
-  }
-
-  def findminimalResourcesPerRole(offersWanted: ReviveOffersState): ReviveOffersState = {
-    minimalResourcesPerRole = Map();
-    offersWanted.instancesWantingOffers.foreach(roleInfo => {
-      val role: String = roleInfo._1;
-      var actualMinimal = Resources(0.0, 0, 0, 0, 0);
-      var minCpus: Double = Double.MaxValue;
-      var minMem: Double = Double.MaxValue;
-      var minDisk: Double = Double.MaxValue;
-      val instances: Map[Instance.Id, OffersWantedInfo] = roleInfo._2;
-
-      instances.foreach(instance => {
-        val requiredResources: Resources = instance._2.resources;
-        minCpus = if (minCpus > requiredResources.cpus) requiredResources.cpus else minCpus;
-        minMem = if (minMem > requiredResources.mem) requiredResources.mem else minMem;
-        minDisk = if (minDisk > requiredResources.disk) requiredResources.disk else minDisk;
-        actualMinimal = Resources(minCpus, minMem, minDisk, 0, 0)
-      })
-
-      minimalResourcesPerRole = minimalResourcesPerRole + (role -> actualMinimal);
-    })
-
-    return offersWanted
   }
 
   def reviveDirectiveFlow(enableSuppress: Boolean): Flow[Map[Role, VersionedRoleState], RoleDirective, NotUsed] = {
@@ -128,7 +102,7 @@ object ReviveOffersStreamLogic extends StrictLogging {
     */
   private[impl] trait ReviveDirectiveFlowLogic {
     def lastOffersWantedVersion(lastState: Map[Role, VersionedRoleState], role: Role): Option[Long] =
-      lastState.get(role).collect { case VersionedRoleState(version, OffersWanted) => version }
+      lastState.get(role).collect { case VersionedRoleState(version, OffersWanted, _) => version }
 
     def directivesForDiff(lastState: Map[Role, VersionedRoleState], newState: Map[Role, VersionedRoleState]): List[RoleDirective]
   }
@@ -138,6 +112,13 @@ object ReviveOffersStreamLogic extends StrictLogging {
     def directivesForDiff(lastState: Map[Role, VersionedRoleState], newState: Map[Role, VersionedRoleState]): List[RoleDirective] = {
       val rolesChanged = lastState.keySet != newState.keySet
       val directives = List.newBuilder[RoleDirective]
+
+      val minimalResourcesPerRole = newState.iterator
+        .collect {
+          case (role, VersionedRoleState(version, OffersWanted, minimalResources)) => role -> minimalResources
+        }
+        .toMap
+      logger.info(s"Request resources for roles ${minimalResourcesPerRole}")
 
       if (rolesChanged) {
         val newRoleState = newState.keysIterator.map { role =>
@@ -153,13 +134,20 @@ object ReviveOffersStreamLogic extends StrictLogging {
       }
       val needsExplicitRevive = newState.iterator
         .collect {
-          case (role, VersionedRoleState(_, OffersWanted)) if !lastState.get(role).exists(_.roleState.isWanted) => role
-          case (role, VersionedRoleState(version, OffersWanted)) if lastOffersWantedVersion(lastState, role).exists(_ < version) => role
+          case (role, VersionedRoleState(_, OffersWanted, _)) if !lastState.get(role).exists(_.roleState.isWanted) => role
+          case (role, VersionedRoleState(version, OffersWanted, _)) if lastOffersWantedVersion(lastState, role).exists(_ < version) => role
         }
         .toSet
 
+      val requestResources = RequestResources(
+        minimalResourcesPerRole.keySet,
+        minimalResourcesPerRole
+      )
+      logger.info(s"minimal resources are ${minimalResourcesPerRole}")
       if (needsExplicitRevive.nonEmpty)
         directives += IssueRevive(needsExplicitRevive, minimalResourcesPerRole)
+      else if (minimalResourcesPerRole.keySet.nonEmpty)
+        directives += requestResources;
 
       directives.result()
     }
@@ -168,7 +156,7 @@ object ReviveOffersStreamLogic extends StrictLogging {
   private[impl] class ReviveDirectiveFlowLogicWithSuppression extends ReviveDirectiveFlowLogic {
 
     private def offersNotWantedRoles(state: Map[Role, VersionedRoleState]): Set[Role] =
-      state.collect { case (role, VersionedRoleState(_, OffersNotWanted)) => role }.toSet
+      state.collect { case (role, VersionedRoleState(_, OffersNotWanted, _)) => role }.toSet
 
     def updateFrameworkNeeded(lastState: Map[Role, VersionedRoleState], newState: Map[Role, VersionedRoleState]) = {
       val rolesChanged = lastState.keySet != newState.keySet
@@ -178,11 +166,17 @@ object ReviveOffersStreamLogic extends StrictLogging {
 
     def directivesForDiff(lastState: Map[Role, VersionedRoleState], newState: Map[Role, VersionedRoleState]): List[RoleDirective] = {
       val directives = List.newBuilder[RoleDirective]
+      val minimalResourcesPerRole = newState.iterator
+        .collect {
+          case (role, VersionedRoleState(version, OffersWanted, minimalResources)) => role -> minimalResources
+        }
+        .toMap
 
       if (updateFrameworkNeeded(lastState, newState)) {
         val roleState = newState.map {
-          case (role, VersionedRoleState(_, state)) => role -> state
+          case (role, VersionedRoleState(_, state, _)) => role -> state
         }
+
         val newlyWanted = newState
           .iterator
           .collect { case (role, v) if v.roleState.isWanted && !lastState.get(role).exists(_.roleState.isWanted) => role }
@@ -192,14 +186,20 @@ object ReviveOffersStreamLogic extends StrictLogging {
           .iterator
           .collect { case (role, v) if !v.roleState.isWanted && lastState.get(role).exists(_.roleState.isWanted) => role }
           .to[Set]
-        directives += UpdateFramework(roleState, newlyRevived = newlyWanted, newlySuppressed = newlyNotWanted)
+
+        directives += UpdateFramework(roleState, newlyRevived = newlyWanted, newlySuppressed = newlyNotWanted, minimalResourcesPerRole)
       }
 
       val rolesNeedingRevive = newState.view
-        .collect { case (role, VersionedRoleState(version, OffersWanted)) if lastOffersWantedVersion(lastState, role).exists(_ < version) => role }.toSet
+        .collect { case (role, VersionedRoleState(version, OffersWanted, _)) if lastOffersWantedVersion(lastState, role).exists(_ < version) => role }.toSet
 
+      logger.debug(s"minimal requested resources are ${minimalResourcesPerRole}")
+
+      // If no roles need revive, send a Request resources to update the minimal set on the Allocator
       if (rolesNeedingRevive.nonEmpty)
         directives += IssueRevive(rolesNeedingRevive, minimalResourcesPerRole)
+      else if (minimalResourcesPerRole.keySet.nonEmpty)
+        directives += RequestResources(minimalResourcesPerRole.keySet, minimalResourcesPerRole)
 
       directives.result()
 
@@ -229,7 +229,9 @@ object ReviveOffersStreamLogic extends StrictLogging {
     */
   private[impl] class ReviveRepeaterLogic extends StrictLogging {
     var currentRoleState: Map[Role, RoleOfferState] = Map.empty
+    var currentMinimalResouces: Map[Role, Resources] = Map.empty
     var repeatIn: Map[Role, Int] = Map.empty
+    var requestRepeatIn: Map[Role, Int] = Map.empty
 
     def markRolesForRepeat(roles: Iterable[Role]): Unit =
       roles.foreach {
@@ -238,15 +240,32 @@ object ReviveOffersStreamLogic extends StrictLogging {
           repeatIn += role -> 2
       }
 
+    def markRolesForRequestRepeat(roles: Iterable[Role]): Unit =
+      roles.foreach {
+        role =>
+          // Override any old state.
+          requestRepeatIn += role -> 2
+      }
+
     def processRoleDirective(directive: RoleDirective): Unit = directive match {
       case updateFramework: UpdateFramework =>
         logger.info(s"Issuing update framework for $updateFramework")
         currentRoleState = updateFramework.roleState
+        currentMinimalResouces = updateFramework.minimalResourcesPerRole
         markRolesForRepeat(updateFramework.newlyRevived)
 
       case IssueRevive(roles, minimalResourcesPerRole) =>
         logger.info(s"Issuing revive for roles $roles")
+        currentMinimalResouces = minimalResourcesPerRole
         markRolesForRepeat(roles) // set / reset the repeat delay
+
+      case RequestResources(roles, minimalResourcesPerRole) =>
+        if (currentMinimalResouces != minimalResourcesPerRole) {
+          logger.info(s"Issuing Request for roles ${roles}")
+          currentMinimalResouces = minimalResourcesPerRole
+          markRolesForRequestRepeat(roles)
+        }
+
     }
 
     def handleTick(): List[RoleDirective] = {
@@ -254,20 +273,33 @@ object ReviveOffersStreamLogic extends StrictLogging {
       val newRepeatIn = repeatIn.collect {
         case (k, v) if v >= 1 => k -> (v - 1)
       }
+      val newRequestRepeatIn = requestRepeatIn.collect {
+        case (k, v) if v >= 1 => k -> (v - 1)
+      }
 
       // Repeat revives for those roles that waited for a tick.
       val rolesForReviveRepetition = newRepeatIn.iterator.collect {
         case (role, counter) if counter == 0 && currentRoleState.get(role).contains(OffersWanted) => role
       }.toSet
+      val rolesForRequestRepetition = newRequestRepeatIn.iterator.collect {
+        case (role, counter) if counter == 0 && currentRoleState.get(role).contains(OffersWanted) => role
+      }.toSet
 
       repeatIn = newRepeatIn
+      requestRepeatIn = newRequestRepeatIn
 
       if (rolesForReviveRepetition.isEmpty) {
         logger.info(s"Found no roles suitable for revive repetition.")
-        Nil
+        if (requestRepeatIn.isEmpty) {
+          logger.info(s"Found no roles suitable for request repetition.")
+          Nil
+        } else {
+          logger.info(s"Repeat request for roles ${requestRepeatIn}.")
+          List(RequestResources(rolesForRequestRepetition, currentMinimalResouces))
+        }
       } else {
         logger.info(s"Repeat revive for roles $rolesForReviveRepetition.")
-        List(IssueRevive(rolesForReviveRepetition, minimalResourcesPerRole))
+        List(IssueRevive(rolesForReviveRepetition, currentMinimalResouces))
       }
     }
   }
@@ -289,7 +321,7 @@ object ReviveOffersStreamLogic extends StrictLogging {
       minimalResourcesPerRole: Map[Role, Resources] = Map.empty) extends RoleDirective
 
   case class IssueRevive(roles: Set[String], minimalResourcesPerRole: Map[Role, Resources] = Map.empty) extends RoleDirective
-
-  case class VersionedRoleState(version: Long, roleState: RoleOfferState)
+  case class RequestResources(roles: Set[String], minimalResourcesPerRole: Map[Role, Resources] = Map.empty) extends RoleDirective
+  case class VersionedRoleState(version: Long, roleState: RoleOfferState, minimalResources: Resources = Resources(0, 0, 0, 0, 0))
 
 }

@@ -7,7 +7,7 @@ import akka.stream.scaladsl.{Flow, Keep, Sink, Source}
 import mesosphere.AkkaUnitTest
 import mesosphere.marathon.core.instance.update.{InstanceChangeOrSnapshot, InstanceUpdated, InstancesSnapshot}
 import mesosphere.marathon.core.instance.{Instance, TestInstanceBuilder}
-import mesosphere.marathon.core.launchqueue.impl.ReviveOffersStreamLogic.{DelayedStatus, IssueRevive, RoleDirective, UpdateFramework}
+import mesosphere.marathon.core.launchqueue.impl.ReviveOffersStreamLogic.{DelayedStatus, IssueRevive, RoleDirective, UpdateFramework, RequestResources}
 import mesosphere.marathon.state.{AbsolutePathId, AppDefinition}
 import org.scalatest.Inside
 
@@ -19,8 +19,8 @@ class ReviveOffersStreamLogicTest extends AkkaUnitTest with Inside {
 
   import ReviveOffersStreamLogic.{Delayed, NotDelayed}
 
-  val webApp = AppDefinition(id = AbsolutePathId("/test"), role = "web")
-  val monitoringApp = AppDefinition(id = AbsolutePathId("/test2"), role = "monitoring")
+  val webApp = AppDefinition(id = AbsolutePathId("/test"), role = "web", resources = Resources(2, 1024, 2048, 1, 1024))
+  val monitoringApp = AppDefinition(id = AbsolutePathId("/test2"), role = "monitoring", resources = Resources(4, 2048, 4096, 0, 2048))
 
   val inputSourceQueue = Source.queue[Either[InstanceChangeOrSnapshot, DelayedStatus]](16, OverflowStrategy.fail)
   val outputSinkQueue = Sink.queue[RoleDirective]()
@@ -59,6 +59,14 @@ class ReviveOffersStreamLogicTest extends AkkaUnitTest with Inside {
           roleState shouldBe Map("web" -> OffersWanted)
           newlyRevived shouldBe Set("web")
           newlySuppressed shouldBe Set.empty
+
+      }
+
+      And("the request resources is repeated")
+      inside(output.pull().futureValue) {
+        case Some(RequestResources(roles, minimalResourcesPerRole)) =>
+          roles shouldBe Set("web")
+          minimalResourcesPerRole shouldBe Map("web" -> Resources(2, 1024, 2048, 1, 1024))
       }
 
       And("the revive is eventually repeated")
@@ -81,7 +89,7 @@ class ReviveOffersStreamLogicTest extends AkkaUnitTest with Inside {
         .via(suppressReviveFlow)
         .runWith(Sink.seq)
         .futureValue
-
+      print(result)
       inside(result) {
         case Seq(UpdateFramework(roleState, newlyRevived, newlySuppressed, _)) =>
           roleState shouldBe Map("web" -> OffersWanted)
@@ -98,7 +106,7 @@ class ReviveOffersStreamLogicTest extends AkkaUnitTest with Inside {
       logic.processRoleDirective(UpdateFramework(Map("role" -> OffersWanted), Set("role"), Set.empty))
 
       logic.handleTick() shouldBe Nil
-      logic.handleTick() shouldBe List(IssueRevive(Set("role"), Map("web" -> Resources(0, 0, 0, 0, 0))))
+      logic.handleTick() shouldBe List(IssueRevive(Set("role"), Map()))
     }
 
     "does not repeat revives for roles that become suppressed" in {
@@ -121,14 +129,14 @@ class ReviveOffersStreamLogicTest extends AkkaUnitTest with Inside {
       logic.handleTick() shouldBe Nil
 
       // First repeat for update framework
-      logic.handleTick() shouldBe List(IssueRevive(Set("role"), Map("web" -> Resources(0, 0, 0, 0, 0))))
+      logic.handleTick() shouldBe List(IssueRevive(Set("role"), Map()))
 
       // Revive was triggered
       logic.processRoleDirective(IssueRevive(Set("role")))
       logic.handleTick() shouldBe Nil
 
       // Second repeat for newly triggered revive
-      logic.handleTick() shouldBe List(IssueRevive(Set("role"), Map("web" -> Resources(0, 0, 0, 0, 0))))
+      logic.handleTick() shouldBe List(IssueRevive(Set("role"), Map()))
       logic.handleTick() shouldBe Nil
     }
   }
@@ -155,7 +163,7 @@ class ReviveOffersStreamLogicTest extends AkkaUnitTest with Inside {
       }
     }
 
-    "emit a single revive for a snapshot with multiple instances to launch" in {
+    "emit a single revive for a snapshot with multiple instances to launch with a request resources" in {
       val instance1 = Instance.scheduled(webApp)
       val instance2 = Instance.scheduled(webApp)
 
@@ -164,10 +172,12 @@ class ReviveOffersStreamLogicTest extends AkkaUnitTest with Inside {
         .runWith(Sink.seq)
         .futureValue
       inside(results) {
-        case Seq(UpdateFramework(roleState, newlyRevived, newlySuppressed, _)) =>
+        case Seq(UpdateFramework(roleState, newlyRevived, newlySuppressed, _), RequestResources(roles, minimalResourcesPerRole)) =>
           roleState shouldBe Map("web" -> OffersWanted)
           newlyRevived shouldBe Set("web")
           newlySuppressed shouldBe Set.empty
+          roles shouldBe Set("web")
+          minimalResourcesPerRole shouldBe Map("web" -> Resources(2, 1024, 2048, 1, 1024))
       }
     }
 
@@ -185,13 +195,14 @@ class ReviveOffersStreamLogicTest extends AkkaUnitTest with Inside {
         .futureValue
 
       inside(results) {
-        case Seq(updateFramework: UpdateFramework, updateToReviveForFirstInstance: UpdateFramework, reviveForSecondInstance: IssueRevive) =>
+        case Seq(updateFramework: UpdateFramework, updateToReviveForFirstInstance: UpdateFramework, requestResources: RequestResources, reviveForSecondInstance: IssueRevive) =>
           updateFramework.roleState shouldBe Map("web" -> OffersNotWanted)
-
           updateToReviveForFirstInstance.roleState shouldBe Map("web" -> OffersWanted)
           updateToReviveForFirstInstance.newlyRevived shouldBe Set("web")
-
           reviveForSecondInstance.roles shouldBe Set("web")
+          requestResources.roles shouldBe Set("web")
+          requestResources.minimalResourcesPerRole shouldBe Map("web" -> Resources(2, 1024, 2048, 1, 1024))
+
       }
     }
 
@@ -208,7 +219,7 @@ class ReviveOffersStreamLogicTest extends AkkaUnitTest with Inside {
         .futureValue
 
       inside(results) {
-        case Seq(updateFramework: UpdateFramework, updateToReviveForFirstInstance: UpdateFramework) =>
+        case Seq(updateFramework: UpdateFramework, updateToReviveForFirstInstance: UpdateFramework, _, _) =>
           updateFramework.roleState shouldBe Map("web" -> OffersNotWanted)
 
           updateToReviveForFirstInstance.roleState shouldBe Map("web" -> OffersWanted)
@@ -248,7 +259,7 @@ class ReviveOffersStreamLogicTest extends AkkaUnitTest with Inside {
         .futureValue
 
       inside(results) {
-        case Seq(initialUpdate: UpdateFramework, update1: UpdateFramework, update2: UpdateFramework, update3: UpdateFramework) =>
+        case Seq(initialUpdate: UpdateFramework, update1: UpdateFramework, _, update2: UpdateFramework, update3: UpdateFramework, _) =>
           initialUpdate.roleState("web") shouldBe OffersNotWanted
           update1.roleState("web") shouldBe OffersWanted
           update2.roleState("web") shouldBe OffersNotWanted
@@ -269,7 +280,7 @@ class ReviveOffersStreamLogicTest extends AkkaUnitTest with Inside {
         .futureValue
 
       inside(results) {
-        case Seq(update1: UpdateFramework, update2: UpdateFramework) =>
+        case Seq(update1: UpdateFramework, _, update2: UpdateFramework, _) =>
           update1.roleState shouldBe Map(
             "monitoring" -> OffersWanted,
             "web" -> OffersWanted)

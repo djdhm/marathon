@@ -9,7 +9,7 @@ import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.{Done, NotUsed}
 import com.typesafe.scalalogging.StrictLogging
 import mesosphere.marathon.core.instance.update.InstanceChangeOrSnapshot
-import mesosphere.marathon.core.launchqueue.impl.ReviveOffersStreamLogic.{IssueRevive, RoleDirective, UpdateFramework}
+import mesosphere.marathon.core.launchqueue.impl.ReviveOffersStreamLogic.{IssueRevive, RequestResources, RoleDirective, UpdateFramework}
 import mesosphere.marathon.core.task.tracker.InstanceTracker
 import mesosphere.marathon.metrics.{Counter, Metrics}
 import org.apache.mesos.Protos.FrameworkInfo
@@ -75,7 +75,14 @@ class ReviveOffersActor(
         Resource.newBuilder.setName("disk")
           .setType(SCALAR)
           .setScalar(Scalar.newBuilder().setValue(resources.disk)))
-
+      .addResources(
+        Resource.newBuilder.setName("gpus")
+          .setType(SCALAR)
+          .setScalar(Scalar.newBuilder().setValue(resources.gpus)))
+      .addResources(
+        Resource.newBuilder.setName("network_bandwidth")
+          .setType(SCALAR)
+          .setScalar(Scalar.newBuilder().setValue(resources.networkBandwidth)))
     b.build
   }
 
@@ -108,6 +115,7 @@ class ReviveOffersActor(
                 .collect { case (role, OffersNotWanted) => role }
                 .toSeq
               d.updateFramework(newInfo, suppressedRoles.asJava)
+
             }
 
           case IssueRevive(roles, minimalResourcesPerRole) =>
@@ -120,6 +128,13 @@ class ReviveOffersActor(
 
             }
 
+          case RequestResources(roles, minimalResourcesPerRole) =>
+            driverHolder.driver.foreach { d =>
+              roles.foreach(role => {
+                val requests: List[Request] = List(requestWithResources(minimalResourcesPerRole.getOrElse(role, Resources(0, 0, 0, 0, 0))))
+                d.requestResources(requests.asJava);
+              })
+            }
         })
     }
 
@@ -144,7 +159,12 @@ class ReviveOffersActor(
         reviveCountMetric.increment()
         logger.info(s"Role '${role}' explicitly revived")
       }
+      directive
 
+    case directive @ RequestResources(roles, minimalResourcesPerRole) =>
+      roles.foreach { role =>
+        logger.info(s"Role '${role}' request resources")
+      }
       directive
   }
 

@@ -155,12 +155,35 @@ case class ReviveOffersState(
       val iterator = instancesWantingOffers.getOrElse(role, Map.empty).values
         .iterator
         .filter(launchAllowedOrCleanUpRequired)
-
-      if (iterator.isEmpty)
+      val offersWantedList = iterator.toList;
+      val minimalResources = findMinimalResources(offersWantedList)
+      if (offersWantedList.isEmpty)
         role -> VersionedRoleState(version, OffersNotWanted)
       else
-        role -> VersionedRoleState(iterator.map(_.version).max, OffersWanted)
+        role -> VersionedRoleState(offersWantedList.map(_.version).max, OffersWanted, minimalResources)
     }.toMap
+  }
+
+  private def findMinimalResources(offersWantedInfos: List[OffersWantedInfo]): Resources = {
+
+    var actualMinimal = Resources(0, 0, 0, 0, 0);
+    var minCpus: Double = Double.MaxValue;
+    var minMem: Double = Double.MaxValue;
+    var minDisk: Double = Double.MaxValue;
+    var minGpus: Int = Int.MaxValue;
+    var minNetworkBandwidth: Int = Int.MaxValue;
+    logger.debug(s"Scheduled Instances for launch are ${offersWantedInfos}")
+
+    offersWantedInfos.foreach(instance => {
+      val requiredResources: Resources = instance.resources;
+      minCpus = List(minCpus, requiredResources.cpus).min
+      minMem = List(minMem, requiredResources.mem).min
+      minDisk = List(minDisk, requiredResources.disk).min
+      minGpus = List(minGpus, requiredResources.gpus).min
+      minNetworkBandwidth = List(minNetworkBandwidth, requiredResources.networkBandwidth).min;
+    })
+
+    Resources(minCpus, minMem, minDisk, minGpus, minNetworkBandwidth)
   }
 
   /** @return true if a instance has no active delay, or the instance requires clean up. */

@@ -36,7 +36,7 @@ class ReviveOffersStateTest extends UnitTest with Inside {
       .withSnapshot(InstancesSnapshot(List(monitoringScheduledInstance)), defaultRole = "*")
 
     val priorVersion = inside(state.roleReviveVersions("monitoring")) {
-      case VersionedRoleState(version, roleState) =>
+      case VersionedRoleState(version, roleState, _) =>
         roleState shouldBe OffersWanted
         version
     }
@@ -48,7 +48,7 @@ class ReviveOffersStateTest extends UnitTest with Inside {
     state = state.withoutDelay(monitoringApp.configRef)
 
     inside(state.roleReviveVersions("monitoring")) {
-      case VersionedRoleState(version, roleState) =>
+      case VersionedRoleState(version, roleState, _) =>
         roleState shouldBe OffersWanted
         version should be > priorVersion
     }
